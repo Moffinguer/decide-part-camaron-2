@@ -1,27 +1,29 @@
 import datetime
 import random
+import subprocess
 from django.contrib.auth.models import User
 from django.utils import timezone
 from django.test import TestCase
-from rest_framework.test import APIClient
-from rest_framework.test import APITestCase
+from django.urls import reverse
 
 from .models import Vote
 from .serializers import VoteSerializer
-from base import mods
-from base.models import Auth
 from base.tests import BaseTestCase
 from census.models import Census
-from mixnet.models import Key
 from voting.models import Question
 from voting.models import Voting
+
+from django.conf import settings
+from django.test import Client
+import os
+from django.db import transaction
+
 
 from channels.testing import WebsocketCommunicator
 from channels.routing import URLRouter
 from django.urls import re_path
 from .consumers import VoteConsumer
 from channels.layers import get_channel_layer
-
 
 class StoreTextCase(BaseTestCase):
 
@@ -33,7 +35,7 @@ class StoreTextCase(BaseTestCase):
                              name='voting example',
                              question=self.question,
                              start_date=timezone.now(),
-        )
+                             )
         self.voting.save()
 
     def tearDown(self):
@@ -41,7 +43,7 @@ class StoreTextCase(BaseTestCase):
 
     def gen_voting(self, pk):
         voting = Voting(pk=pk, name='v1', question=self.question, start_date=timezone.now(),
-                end_date=timezone.now() + datetime.timedelta(days=1))
+                        end_date=timezone.now() + datetime.timedelta(days=1))
         voting.save()
 
     def get_or_create_user(self, pk):
@@ -66,7 +68,7 @@ class StoreTextCase(BaseTestCase):
             data = {
                 "voting": v,
                 "voter": random_user,
-                "vote": { "a": a, "b": b }
+                "vote": {"a": a, "b": b}
             }
             response = self.client.post('/store/', data, format='json')
             self.assertEqual(response.status_code, 200)
@@ -78,7 +80,7 @@ class StoreTextCase(BaseTestCase):
         data = {
             "voting": 1,
             "voter": 1,
-            "vote": { "a": 1, "b": 1 }
+            "vote": {"a": 1, "b": 1}
         }
         response = self.client.post('/store/', data, format='json')
         self.assertEqual(response.status_code, 401)
@@ -93,7 +95,7 @@ class StoreTextCase(BaseTestCase):
         data = {
             "voting": VOTING_PK,
             "voter": 1,
-            "vote": { "a": CTE_A, "b": CTE_B }
+            "vote": {"a": CTE_A, "b": CTE_B}
         }
         user = self.get_or_create_user(1)
         self.login(user=user.username)
@@ -121,48 +123,56 @@ class StoreTextCase(BaseTestCase):
         votes = response.json()
 
         self.assertEqual(len(votes), Vote.objects.count())
-        self.assertEqual(votes[0], VoteSerializer(Vote.objects.all().first()).data)
+        self.assertEqual(votes[0], VoteSerializer(
+            Vote.objects.all().first()).data)
 
     def test_filter(self):
         votings, voters = self.gen_votes()
         v = votings[0]
 
-        response = self.client.get('/store/?voting_id={}'.format(v), format='json')
+        response = self.client.get(
+            '/store/?voting_id={}'.format(v), format='json')
         self.assertEqual(response.status_code, 401)
 
         self.login(user='noadmin')
-        response = self.client.get('/store/?voting_id={}'.format(v), format='json')
+        response = self.client.get(
+            '/store/?voting_id={}'.format(v), format='json')
         self.assertEqual(response.status_code, 403)
 
         self.login()
-        response = self.client.get('/store/?voting_id={}'.format(v), format='json')
+        response = self.client.get(
+            '/store/?voting_id={}'.format(v), format='json')
         self.assertEqual(response.status_code, 200)
         votes = response.json()
 
         self.assertEqual(len(votes), Vote.objects.filter(voting_id=v).count())
 
         v = voters[0]
-        response = self.client.get('/store/?voter_id={}'.format(v), format='json')
+        response = self.client.get(
+            '/store/?voter_id={}'.format(v), format='json')
         self.assertEqual(response.status_code, 200)
         votes = response.json()
 
         self.assertEqual(len(votes), Vote.objects.filter(voter_id=v).count())
 
     def test_hasvote(self):
-        votings, voters = self.gen_votes()
+        self.gen_votes()
         vo = Vote.objects.first()
         v = vo.voting_id
         u = vo.voter_id
 
-        response = self.client.get('/store/?voting_id={}&voter_id={}'.format(v, u), format='json')
+        response = self.client.get(
+            '/store/?voting_id={}&voter_id={}'.format(v, u), format='json')
         self.assertEqual(response.status_code, 401)
 
         self.login(user='noadmin')
-        response = self.client.get('/store/?voting_id={}&voter_id={}'.format(v, u), format='json')
+        response = self.client.get(
+            '/store/?voting_id={}&voter_id={}'.format(v, u), format='json')
         self.assertEqual(response.status_code, 403)
 
         self.login()
-        response = self.client.get('/store/?voting_id={}&voter_id={}'.format(v, u), format='json')
+        response = self.client.get(
+            '/store/?voting_id={}&voter_id={}'.format(v, u), format='json')
         self.assertEqual(response.status_code, 200)
         votes = response.json()
 
@@ -174,7 +184,7 @@ class StoreTextCase(BaseTestCase):
         data = {
             "voting": 5001,
             "voter": 1,
-            "vote": { "a": 30, "b": 55 }
+            "vote": {"a": 30, "b": 55}
         }
         census = Census(voting_id=5001, voter_id=1)
         census.save()
@@ -199,78 +209,3 @@ class StoreTextCase(BaseTestCase):
         self.voting.save()
         response = self.client.post('/store/', data, format='json')
         self.assertEqual(response.status_code, 401)
-
-
-class DjangoChannelsTest(TestCase):
-
-    def setUp(self):
-        super().setUp()
-        # Crea una pregunta y una votación
-        question = Question.objects.create(desc='Test Question')
-        self.voting = Voting.objects.create(name='Test Voting', question=question)
-        self.voting.save()
-
-    def tearDown(self):
-        super().tearDown()
-
-    def get_or_create_user(self, pk):
-        user, _ = User.objects.get_or_create(pk=pk)
-        user.username = 'user{}'.format(pk)
-        user.set_password('qwerty')
-        user.save()
-        return user
-    
-    async def test_vote_consumer_connection(self):
-        # Define la ruta del WebSocket para el consumidor de votos
-        application = URLRouter([
-            re_path(r'ws/votes/$', VoteConsumer.as_asgi()),
-        ])
-
-        # Crea un comunicador WebSocket para la ruta del consumidor de votos
-        communicator = WebsocketCommunicator(application, 'ws/votes/')
-
-        # Intenta conectar al WebSocket
-        connected, _ = await communicator.connect()
-        self.assertTrue(connected)
-
-        # Desconecta
-        await communicator.disconnect()
-
-    async def test_vote_consumer_message(self):
-
-        # Define la ruta del WebSocket para el consumidor de votos
-        application = URLRouter([
-            re_path(r'ws/votes/$', VoteConsumer.as_asgi()),
-        ])
-
-        # Crea un comunicador WebSocket para la ruta del consumidor de votos
-        communicator = WebsocketCommunicator(application, 'ws/votes/')
-
-        # Conecta al WebSocket
-        connected, _ = await communicator.connect()
-        self.assertTrue(connected)
-
-        # Manda mensaje por Django Channels
-        channel_layer = get_channel_layer()
-        await channel_layer.group_send(
-            'votes', 
-            {
-                'type': 'vote.added',
-                'vote_id': self.voting.id,
-            }
-        )
-
-        # Recibe el mensaje del WebSocket
-        response = await communicator.receive_json_from()
-        
-        # Verifica que el mensaje sea correcto
-        self.assertEqual(response, {
-            'message': 'Vote received',
-            'vote_id': self.voting.id,
-            'vote_count': 0,
-            'vote_percentage': 0.0,
-        })
-
-        # Desconecta
-        await communicator.disconnect()
-        

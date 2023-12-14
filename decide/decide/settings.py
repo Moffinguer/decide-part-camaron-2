@@ -37,7 +37,6 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-
     'dbbackup', # django-dbbackup
     'corsheaders',
     'django_filters',
@@ -76,6 +75,7 @@ MODULES = [
     'store',
     'visualizer',
     'voting',
+    'dbbackup',
 ]
 
 BASEURL = 'http://localhost:8000'
@@ -125,8 +125,8 @@ DATABASES = {
     }
 }
 DBBACKUP_STORAGE = 'django.core.files.storage.FileSystemStorage'
-DBBACKUP_STORAGE_OPTIONS = {'location': BASE_DIR + '/store/backup'}
-
+DATABASE_BACKUP_DIR = BASE_DIR + '/store/backup'
+DBBACKUP_STORAGE_OPTIONS = {'location': DATABASE_BACKUP_DIR}
 
 # Password validation
 # https://docs.djangoproject.com/en/2.0/ref/settings/#auth-password-validators
