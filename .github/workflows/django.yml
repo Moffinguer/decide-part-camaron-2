@@ -37,7 +37,7 @@ jobs:
       with:
         python-version: ${{matrix.pyversion}}
     - name: psycopg2 prerequisites
-      run: sudo apt-get install libpq-dev
+      run: sudo apt-get install libpq-dev chromium-browser chromium-chromedriver
     - name: Install dependencies and config
       run: |
         python -m pip install --upgrade pip
